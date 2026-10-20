@@ -1,0 +1,22 @@
+In this work, we introduce \textbf{Doob Policy Optimization (DoobPO)}, a unified framework for RL fine-tuning of diffusion and flow policies.
+The framework supports a broad family of policy updates and avoids exact action-likelihood evaluation by separating policy improvement from generative policy learning.
+Theoretically, we justify DoobPO from two directions.
+First, we characterize the ratio-tilted diffusion process through Doob's $h$-transform
+(\cref{lem:algo_correctness}).
+We then show that, for each fixed state, the gradient of the conditional drift matching objective is proportional to that of the ideal objective for both diffusion and flow policies
+(\cref{thm:grad_equi_diff,thm:grad_equi_fm}).
+Second, under the stated assumptions, the population minimizer of conditional drift matching induces a diffusion process that solves the corresponding endpoint-constrained stochastic optimal control problem
+(\cref{prop:cdm_solves_soc}).
+The resulting process is the minimum-energy modification of the reference diffusion that realizes the prescribed tilted endpoint marginals.
+This provides a control-theoretic interpretation of how the desired policy update is transferred into generative dynamics.
+Experimentally, we evaluate DoobPO on MuJoCo benchmarks with both diffusion and flow policies and observe superior overall performance against strong baselines
+(\cref{sec:diffusion_exp,sec:flow_exp}).
+
+More broadly, DoobPO provides a common interface between policy optimization and generative model training.
+Policy updates with analytic ratios and updates represented by learned ratio models are accommodated within the same conditional drift matching framework
+(\cref{sec:unified_framework}).
+This separates the choice of the policy update rule from the choice of the generative policy class.
+Nevertheless, our study mainly focuses on continuous generation, and the empirical evaluation is limited to MuJoCo continuous-control benchmarks and Robomimic manipulation tasks.
+The theoretical results characterize population objectives under the stated assumptions.
+An important direction for future work is to quantify how ratio estimation error and approximate drift matching affect the realized policy update.
+We also plan to extend the framework to discrete generation and evaluate its applicability to more complex policy learning settings.

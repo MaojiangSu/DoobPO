@@ -1,0 +1,16 @@
+# LaTeX build outputs (keep source figures and bibliography files)
+*.aux
+*.log
+*.out
+*.toc
+*.lof
+*.lot
+*.blg
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.ptc
+*.bbl-SAVE-ERROR
+main.pdf
+main_neurips.pdf
+.DS_Store

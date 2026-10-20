@@ -28,6 +28,8 @@ assumptions.
 > NIPS 2026. Public paper link forthcoming.
 >
 > **Project page:** https://maojiangsu.github.io/DoobPO/
+>
+> **LaTeX source:** [`paper/`](paper/) (`main.tex`; NeurIPS format: `main_neurips.tex`).
 
 ---
 

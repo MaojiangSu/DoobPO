@@ -1,0 +1,220 @@
+
+\pdfoutput=1
+\RequirePackage[T1]{fontenc}
+\documentclass[12pt]{article}
+\setlength{\parindent}{0pt}
+\usepackage[skip=1em plus 0.2em minus 0.1em]{parskip}
+\sloppy
+
+\usepackage[height=8.85in,width=6.45in]{geometry}
+
+\renewcommand{\baselinestretch}{1.015}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{mathtools}
+\numberwithin{equation}{section}
+\usepackage{slashed}
+\usepackage{braket}
+\usepackage{enumitem}
+\usepackage[svgnames]{xcolor}
+\usepackage[colorlinks,citecolor=DarkGreen,linkcolor=FireBrick,urlcolor=FireBrick,linktocpage,unicode]{hyperref}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{adjustbox}
+\usepackage{tocloft}
+
+% Adjust the spacing in the table of contents
+\setlength{\cftbeforesecskip}{2pt} % Space before section entries
+\setlength{\cftbeforesubsecskip}{0pt} % Space before subsection entries
+\setlength{\cftbeforesubsubsecskip}{0pt} % Space before subsubsection entries
+
+\urlstyle{rm}
+\usepackage[hang,flushmargin,bottom]{footmisc}
+\input{macros.tex}
+
+
+\definecolor{blue}{named}{black}
+
+\newcommand*{\email}[1]{\footnote{\href{mailto:#1}{\texttt{#1}}}}
+
+\setlist[itemize,enumerate]{
+  parsep=\parskip,                                   % paragraphs inside items = main \parskip
+  itemsep=\dimexpr .3em - \parskip\relax plus 2pt,   % keep (itemsep + parsep) unchanged
+  topsep=\dimexpr 6pt - \parskip\relax plus 1pt minus 1pt,
+  partopsep=0pt,
+  listparindent=\parindent
+}
+
+%%% some writing rules
+
+%% Writing rule for creating tags.
+%% Tags :
+%% Theorem    \cref{thm:bla_bla}
+%% Lemma      \cref{lem:bla_bla}
+%% Claim      \cref{cla:bla_bla}
+%% Corollary  \cref{cor:bla_bla}
+%% Fact       \cref{fac:bla_bla}
+%% Definition \cref{def:bla_bla}
+%% Section    \cref{sec:bla_bla}
+%% Subsection \cref{sec:bla_bla}
+%% Equation   \cref{eqn:bla_bla}
+%% Problem    \cref{prb:bla_bla}
+%% Proposition\cref{prp:bla_bla}
+%% Question   \cref{qun:bla_bla}
+
+
+
+\begin{document}
+\begin{titlepage}
+
+\begin{flushright}
+Last Update: \today
+\end{flushright}
+
+\vskip 3em
+\begin{center}
+
+{
+\LARGE \bfseries % Set the font size and series
+\begin{spacing}{1.15} % Example of using a stretch factor for larger line spacing
+\input{title} % Import the content of the title file
+\end{spacing}
+}
+
+\vspace{1.2em}
+{\normalsize
+\text{
+Maojiang Su$^{\dagger,\natural}$
+\hspace{0.7em}
+Qijie Zhu$^{\ddag}$
+\hspace{0.7em}
+Yu Xiao
+$^{\dagger}$
+\hspace{0.7em}
+Shuyang Yu$^{\dagger}$
+}
+\\
+\vspace{0.3em}
+\text{
+Minshuo Chen$^{\S}$
+\hspace{0.7em}
+Zhaoran Wang$^{\S,\dagger}$
+\hspace{0.7em}
+Han Liu$^{\dagger,\ddag,\natural}$
+}
+\\
+
+\vspace{1.8em}
+\begin{minipage}{0.75\textwidth}
+\raggedright
+\small
+$^{\dagger\;}$Department of Computer Science,
+Northwestern University
+\\
+$^{\ddag\;}$Department of Statistics and Data Science,
+Northwestern University
+\\
+$^{\S\;}$Department of Industrial Engineering and Management Sciences,
+\\
+\hphantom{$^{\S\;}$}Northwestern University
+\\
+$^{\natural\;}$Center for Foundation Models and Generative AI,
+Northwestern University
+\end{minipage}
+
+\def\thefootnote{*}
+\footnotetext{
+Project page:
+\href{https://maojiangsu.github.io/DoobPO/}
+{https://maojiangsu.github.io/DoobPO/}.
+}}
+
+
+\vskip 0.5cm
+
+
+\end{center}
+
+
+\noindent
+\input{0abstract}
+
+
+
+\end{titlepage}
+
+
+
+\section{Introduction}
+\label{sec:intro}
+\input{1intro}
+
+
+\section{Preliminaries}
+\label{sec:background}
+\input{2background}
+
+
+\section{Likelihood-Free Generative Policy Optimization}
+\label{sec:method}
+\input{2method}
+
+
+\section{Experiments}
+\label{sec:exp}\input{3exp}
+
+
+\section{Discussion and Conclusion}
+\label{sec:conclusion}\input{4conclusion}
+
+
+% \clearpage
+% \section*{Impact Statement}
+% \input{impact}
+
+% \section*{Acknowledgments}
+% \input{x_acknowledgments}
+
+% {
+% \setlength{\parskip}{0em}
+% \setcounter{tocdepth}{2}
+% \tableofcontents
+% }
+% \setcounter{footnote}{0}
+
+% \clearpage
+
+\appendix
+\label{sec:append}
+\part*{Appendix}
+%\begin{center}
+%	{\LARGE \textbf{Appendix}}
+%\end{center}
+{
+\setlength{\parskip}{-0em}
+\startcontents[sections]
+\printcontents[sections]{ }{1}{}
+}
+
+\input{appendix}
+
+\clearpage
+\def\arxivfont{\rm}
+%\bibliographystyle{alpha}
+\bibliographystyle{plainnat}
+
+
+\if0
+\baselineskip=.98\baselineskip
+\let\originalthebibliography\thebibliography
+\renewcommand\thebibliography[1]{
+  \originalthebibliography{#1}
+%  \setlength{\parskip}{0pt}
+  \setlength{\itemsep}{0pt plus 0.3ex}
+}
+\fi
+
+\bibliography{refs}
+
+\end{document}
