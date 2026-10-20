@@ -29,8 +29,7 @@ wandb/
 # Project page (GitHub Pages serves docs/)
 !docs/**
 
-# LaTeX manuscript: include source files and figures, keep the original ZIP local
-!paper/**
+# Keep the original LaTeX archive local; paper/ contains the published PDF
 /2026_NIPS_Diffusion_RL_via_Doob_h_transform.zip
 
 # Robomimic experiments: keep the env script, ignore runtime outputs

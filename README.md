@@ -25,11 +25,11 @@ the relation between this tractable objective and ideal drift matching for
 both policy classes. See the manuscript for the precise statements and
 assumptions.
 
-> NIPS 2026. Public paper link forthcoming.
+> NIPS 2026.
 >
 > **Project page:** https://maojiangsu.github.io/DoobPO/
 >
-> **LaTeX source:** [`paper/`](paper/) (`main.tex`; NeurIPS format: `main_neurips.tex`).
+> **Paper:** [PDF](paper/DoobPO.pdf).
 
 ---
 
