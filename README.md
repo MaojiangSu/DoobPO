@@ -27,7 +27,7 @@ assumptions.
 
 > NIPS 2026. Public paper link forthcoming.
 >
-> **Project page:** https://tianmanyue.github.io/DoobPO
+> **Project page:** https://maojiangsu.github.io/DoobPO/
 
 ---
 
