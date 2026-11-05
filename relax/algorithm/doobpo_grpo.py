@@ -21,7 +21,7 @@ Policy drift-matching still uses replay (s, a_buf) with stop-grad weights r_β(s
 identical to DoobPO.
 """
 
-from typing import Tuple
+from typing import Optional, Tuple
 
 import jax
 import jax.numpy as jnp
@@ -31,6 +31,7 @@ import haiku as hk
 import pickle
 
 from relax.algorithm.base import Algorithm
+from relax.algorithm.objectives import AdvantageBatch, RatioBatch, RatioSurrogate, resolve_ratio_surrogate
 from relax.algorithm.doobpo import DoobPOOptStates, DoobPOParams, DoobPOTrainState
 from relax.network.diffv2 import Diffv2Net, Diffv2Params
 from relax.utils.experience import Experience
@@ -38,7 +39,11 @@ from relax.utils.typing_utils import Metric
 
 
 class DoobPOGRPO(Algorithm):
-    """Off-policy DoobPO with GRPO-style group-relative ratio learning."""
+    """Off-policy DoobPO with GRPO-style group-relative ratio learning.
+
+    ``ratio_surrogate`` configures learned-ratio optimization only.
+    ``objective`` is its legacy keyword alias, not a general policy objective.
+    """
 
     def __init__(
         self,
@@ -62,6 +67,8 @@ class DoobPOGRPO(Algorithm):
         ratio_regularizer_lambda: float = 0.01,
         ppo_eps: float = 0.2,
         use_ema: bool = True,
+        objective: Optional[RatioSurrogate] = None,
+        ratio_surrogate: Optional[RatioSurrogate] = None,
     ):
         self.agent = agent
         self.ratio_net = ratio_net
@@ -72,6 +79,8 @@ class DoobPOGRPO(Algorithm):
         self.reward_scale = reward_scale
         self.grpo_group_size = int(grpo_group_size)
         self.max_ratio_weight = max_ratio_weight
+        self.ratio_surrogate = resolve_ratio_surrogate(ratio_surrogate, objective, ppo_eps)
+        self.objective = self.ratio_surrogate  # Compatibility alias for earlier callers.
         self.ratio_regularizer_lambda = ratio_regularizer_lambda
         self.ppo_eps = ppo_eps
 
@@ -115,7 +124,7 @@ class DoobPOGRPO(Algorithm):
         K = self.grpo_group_size
         max_ratio_weight_const = max_ratio_weight
         ratio_reg_lambda = self.ratio_regularizer_lambda
-        ppo_eps_const = self.ppo_eps
+        _objective = self.ratio_surrogate
 
         @jax.jit
         def stateless_update(
@@ -190,6 +199,9 @@ class DoobPOGRPO(Algorithm):
             adv_grpo_sg = jax.lax.stop_gradient(adv_grpo)
 
             obs_k = jnp.broadcast_to(obs, (K,) + obs.shape)  # (K, B, obs_dim)
+            adv_grpo_sg = _objective.prepare_advantages(
+                AdvantageBatch(adv_grpo_sg, obs_k, actions_g1, data, step)
+            )
             flat_obs = jnp.reshape(obs_k, (K * obs.shape[0], obs.shape[-1]))
             flat_act1 = jnp.reshape(actions_g1, (K * obs.shape[0], actions_g1.shape[-1]))
             flat_act2 = jnp.reshape(actions_g2, (K * obs.shape[0], actions_g2.shape[-1]))
@@ -197,11 +209,8 @@ class DoobPOGRPO(Algorithm):
             def ratio_loss_fn(rp):
                 r_flat1 = self.ratio_net.apply(rp, flat_obs, flat_act1)
                 r_kb = jnp.reshape(r_flat1, (K, obs.shape[0]))
-                r_clip = jnp.clip(
-                    r_kb, 1.0 - ppo_eps_const, 1.0 + ppo_eps_const
-                )
-                ppo_obj = jnp.minimum(
-                    r_kb * adv_grpo_sg, r_clip * adv_grpo_sg
+                objective_loss = _objective.loss(
+                    RatioBatch(r_kb, adv_grpo_sg, obs_k, actions_g1, data, step)
                 )
 
                 r_flat2 = self.ratio_net.apply(rp, flat_obs, flat_act2)
@@ -210,7 +219,7 @@ class DoobPOGRPO(Algorithm):
                 g_hat_2 = r_kb2.mean() - 1.0
                 regularizer = ratio_reg_lambda * g_hat_1 * g_hat_2
 
-                return -jnp.mean(ppo_obj) + regularizer, r_kb
+                return objective_loss + regularizer, r_kb
 
             (ratio_loss_val, r_beta_kb), ratio_grads = jax.value_and_grad(
                 ratio_loss_fn, has_aux=True
@@ -336,6 +345,8 @@ class DoobPOGRPO(Algorithm):
                 "r_beta_min": jnp.min(r_beta_kb),
                 "r_beta_max": jnp.max(r_beta_kb),
                 "advantage_mean": jnp.mean(adv_grpo),
+                "objective_advantage_mean": jnp.mean(adv_grpo_sg),
+                "objective_advantage_std": jnp.std(adv_grpo_sg),
                 "advantage_std": jnp.std(adv_grpo),
                 "alpha": jnp.exp(log_alpha),
                 "running_q_mean": new_running_mean,

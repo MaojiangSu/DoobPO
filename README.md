@@ -102,6 +102,49 @@ coincides with prior work DPMD
 ([Ma et al. 2025](https://arxiv.org/abs/2502.00361)). The manuscript shows
 how DPMD fits this framework, so it is listed as a baseline below.
 
+## Target-update backends
+
+Different policy objectives need different target-update solvers. DoobPO can
+reuse diffusion/flow matching once a method supplies a valid endpoint tilt
+relative to its reference policy; it does not automatically convert arbitrary
+PO losses into ratio-network losses.
+
+- **Learned ratio:** the four DoobPPO/DoobGRPO adapters accept a
+  `RatioSurrogate(loss_fn, advantage_fn=None)` for their existing solver.
+  Users must justify the ratio-space formulation and its sampling assumptions.
+- **Analytic weights:** DPMD (diffusion) and FPMD (flow) accept a
+  `ClosedFormTilt(log_tilt_fn)` and never construct a ratio network.
+- **Other solvers:** objectives needing a different constrained or numerical
+  update require a dedicated implementation and compatible data. A loss callback
+  alone does not supply that solver.
+
+```bash
+# A custom surrogate for the existing learned-ratio backend
+python scripts/train_mujoco.py --alg doobpo_flow --env Ant-v4 \
+  --ratio_surrogate examples.custom_objective:build \
+  --ratio_surrogate_kwargs '{"clip_low": 0.1, "clip_high": 0.3}'
+
+# A directly evaluated log tilt, without learning a ratio model
+python scripts/train_mujoco.py --alg fpmd --env Ant-v4 \
+  --closed_form_tilt examples.closed_form_tilt:build \
+  --closed_form_tilt_kwargs '{"temperature": 1.0}'
+```
+
+The defaults preserve the original updates. `PolicyObjective`, `--objective`,
+and `--objective_kwargs` remain compatibility aliases for the learned-ratio
+interface only. See [the extension guide](docs/custom_objectives.md) for
+contracts, normalization and sampling limitations, and multi-reward advantage
+preparation. These extensions cover JAX; the separate PyTorch Robomimic
+codebase retains its own training interface.
+
+## Research direction
+
+A future research direction is to develop systematic conversions from general
+policy optimization objectives to generative-policy updates, including the
+conditions under which these conversions are valid and the objective-specific
+solvers they require. Supporting arbitrary PO objectives is a long-term
+research goal.
+
 ## Baselines
 
 | Paper name | Reference | `--alg` flag / source |

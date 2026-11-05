@@ -1,4 +1,4 @@
-from typing import NamedTuple, Tuple
+from typing import NamedTuple, Optional, Tuple
 
 import jax, jax.numpy as jnp
 import numpy as np
@@ -7,6 +7,7 @@ import haiku as hk
 import pickle
 
 from relax.algorithm.base import Algorithm
+from relax.algorithm.objectives import ClosedFormTilt, TiltBatch
 from relax.network.dacer import DACERNet, DACERParams
 from relax.network.diffv2 import Diffv2Net, Diffv2Params
 from relax.utils.experience import Experience
@@ -45,7 +46,11 @@ class DPMD(Algorithm):
         reward_scale: float = 0.2,
         num_samples: int = 200,
         use_ema: bool = True,
+        closed_form_tilt: Optional[ClosedFormTilt] = None,
     ):
+        if closed_form_tilt is not None and not isinstance(closed_form_tilt, ClosedFormTilt):
+            raise TypeError("closed_form_tilt must be ClosedFormTilt or None")
+        self.closed_form_tilt = closed_form_tilt
         self.agent = agent
         self.gamma = gamma
         self.tau = tau
@@ -79,6 +84,7 @@ class DPMD(Algorithm):
             running_std=jnp.float32(1.0)
         )
         self.use_ema = use_ema
+        _tilt = self.closed_form_tilt
 
         @jax.jit
         def stateless_update(
@@ -131,6 +137,10 @@ class DPMD(Algorithm):
                 q_mean, q_std = q_min.mean(), q_min.std()
                 norm_q = q_min - running_mean / running_std
                 scaled_q = norm_q.clip(-3., 3.) / jnp.exp(log_alpha)
+                if _tilt is not None:
+                    scaled_q = _tilt.log_weights(
+                        TiltBatch(scaled_q, q_min, jnp.exp(log_alpha), next_obs, next_action, data, step)
+                    )
                 q_weights = jnp.exp(scaled_q)
                 # q_weights = q_weights
                 def denoiser(t, x):

@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import os.path
 import sys
@@ -30,6 +31,7 @@ from relax.algorithm.doobpo import DoobPO
 from relax.algorithm.doobpo_grpo import DoobPOGRPO
 from relax.algorithm.doobpo_flow import DoobPOFlow
 from relax.algorithm.doobpo_flow_grpo import DoobPOFlowGRPO
+from relax.algorithm.objectives import load_closed_form_tilt, load_ratio_surrogate
 from relax.algorithm.fpmd import FPMD
 from relax.algorithm.fpo_flow import FPOFlow
 from relax.algorithm.reinflow import ReinFlow
@@ -84,6 +86,14 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--utd", type=int, default=1, help="update-to-data ratio (update_per_iteration)")
     # DoobPO-specific
+    parser.add_argument("--ratio_surrogate", "--objective", dest="ratio_surrogate", type=str, default="ppo",
+                        help="Learned-ratio backend only: ppo or module:factory (--objective is a legacy alias)")
+    parser.add_argument("--ratio_surrogate_kwargs", "--objective_kwargs", dest="ratio_surrogate_kwargs",
+                        type=str, default="{}", help="JSON keyword arguments for the ratio-surrogate factory")
+    parser.add_argument("--closed_form_tilt", type=str, default=None,
+                        help="DPMD/FPMD only: module:factory for a user-derived log tilt; no ratio network")
+    parser.add_argument("--closed_form_tilt_kwargs", type=str, default="{}",
+                        help="JSON keyword arguments for the closed-form tilt factory")
     parser.add_argument("--ppo_eps", type=float, default=0.2)
     parser.add_argument("--ratio_lr", type=float, default=3e-4)
     parser.add_argument("--reward_scale", type=float, default=0.2)
@@ -222,6 +232,38 @@ if __name__ == "__main__":
                              "Default: official ReinFlow ShortCut yaml per task family (Ant-v4 same as ant-v2, etc.).")
     args = parser.parse_args()
 
+    doobpo_algs = ("doobpo", "doobpo_grpo", "doobpo_flow", "doobpo_flow_grpo")
+    analytic_algs = ("dpmd", "fpmd")
+    try:
+        surrogate_kwargs = json.loads(args.ratio_surrogate_kwargs)
+        tilt_kwargs = json.loads(args.closed_form_tilt_kwargs)
+        if not isinstance(surrogate_kwargs, dict) or not isinstance(tilt_kwargs, dict):
+            raise ValueError("Surrogate and tilt kwargs must be JSON objects")
+        if args.alg not in doobpo_algs and (args.ratio_surrogate != "ppo" or surrogate_kwargs):
+            raise ValueError("--ratio_surrogate requires a learned-ratio DoobPO algorithm")
+        if args.alg not in analytic_algs and (args.closed_form_tilt is not None or tilt_kwargs):
+            raise ValueError("--closed_form_tilt requires --alg dpmd or fpmd")
+        if args.closed_form_tilt is None and tilt_kwargs:
+            raise ValueError("--closed_form_tilt_kwargs requires --closed_form_tilt")
+        ratio_surrogate = (
+            load_ratio_surrogate(args.ratio_surrogate, surrogate_kwargs, clip_eps=args.ppo_eps)
+            if args.alg in doobpo_algs else None
+        )
+        closed_form_tilt = (
+            load_closed_form_tilt(args.closed_form_tilt, tilt_kwargs)
+            if args.closed_form_tilt is not None else None
+        )
+    except (ValueError, TypeError, ImportError) as exc:
+        parser.error(str(exc))
+    # Persist the explicitly selected backend and its configuration. A loss does
+    # not automatically determine a valid target-update solver.
+    args.ratio_surrogate_kwargs = surrogate_kwargs
+    args.closed_form_tilt_kwargs = tilt_kwargs
+    args.target_update_backend = (
+        "learned_ratio" if args.alg in doobpo_algs
+        else "analytic_weights" if args.alg in analytic_algs else "algorithm_specific"
+    )
+
     _ratio_mlp_spec = (args.ratio_mlp_hidden_sizes or "").strip()
     ratio_hidden_sizes_kw = None
     if _ratio_mlp_spec:
@@ -276,7 +318,7 @@ if __name__ == "__main__":
                                           num_particles=args.num_particles, 
                                           noise_scale=args.noise_scale,
                                           beta_schedule_scale=args.beta_schedule_scale)
-        algorithm = DPMD(agent, params, lr=args.lr, alpha_lr=args.alpha_lr, delay_alpha_update=args.delay_alpha_update, lr_schedule_end=args.lr_schedule_end)
+        algorithm = DPMD(agent, params, closed_form_tilt=closed_form_tilt, lr=args.lr, alpha_lr=args.alpha_lr, delay_alpha_update=args.delay_alpha_update, lr_schedule_end=args.lr_schedule_end)
 
     elif args.alg == 'doobpo':
         def mish(x: jax.Array):
@@ -291,6 +333,7 @@ if __name__ == "__main__":
         )
         algorithm = DoobPO(
             agent, params, ratio_net, ratio_params,
+            ratio_surrogate=ratio_surrogate,
             lr=args.lr,
             ratio_lr=args.ratio_lr,
             alpha_lr=args.alpha_lr,
@@ -317,6 +360,7 @@ if __name__ == "__main__":
         )
         algorithm = DoobPOGRPO(
             agent, params, ratio_net, ratio_params,
+            ratio_surrogate=ratio_surrogate,
             lr=args.lr,
             ratio_lr=args.ratio_lr,
             alpha_lr=args.alpha_lr,
@@ -359,6 +403,7 @@ if __name__ == "__main__":
         # Off-policy: match diffusion DoobPO (--alg doobpo) lr / reward / PPO-ratio hyperparameters.
         algorithm = DoobPOFlow(
             agent, params, ratio_net, ratio_params,
+            ratio_surrogate=ratio_surrogate,
             lr=args.lr,
             value_lr=args.lr,
             ratio_lr=args.ratio_lr,
@@ -419,6 +464,7 @@ if __name__ == "__main__":
         q_apply = q.apply
         algorithm = FPMD(
             agent, params,
+            closed_form_tilt=closed_form_tilt,
             lr=args.lr,
             value_lr=args.lr,
             q_lr=args.lr,
@@ -478,6 +524,7 @@ if __name__ == "__main__":
         )
         algorithm = DoobPOFlowGRPO(
             agent, params, ratio_net, ratio_params,
+            ratio_surrogate=ratio_surrogate,
             lr=args.lr,
             value_lr=args.lr,
             ratio_lr=args.ratio_lr,

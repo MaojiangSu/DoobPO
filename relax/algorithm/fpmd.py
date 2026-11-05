@@ -26,6 +26,7 @@ import haiku as hk
 import pickle
 
 from relax.algorithm.base import Algorithm
+from relax.algorithm.objectives import ClosedFormTilt, TiltBatch
 from relax.network.flow_ppo import FlowPPONet, FlowPPOParams
 from relax.utils.experience import Experience, GAEExperience
 from relax.utils.typing_utils import Metric
@@ -104,7 +105,11 @@ class FPMD(Algorithm):
         delay_alpha_update: int = 250,
         noise_scale: float = 0.1,
         target_entropy_scale: float = 0.9,
+        closed_form_tilt: Optional[ClosedFormTilt] = None,
     ):
+        if closed_form_tilt is not None and not isinstance(closed_form_tilt, ClosedFormTilt):
+            raise TypeError("closed_form_tilt must be ClosedFormTilt or None")
+        self.closed_form_tilt = closed_form_tilt
         self.agent = agent
         self.gamma = gamma
         self.gae_lambda = gae_lambda
@@ -191,6 +196,7 @@ class FPMD(Algorithm):
             )
 
         agent_ref = self.agent
+        _tilt = self.closed_form_tilt
         _max_rw = max_ratio_weight
         _vloss_coef = value_loss_coeff
         _huber_delta = huber_delta
@@ -237,7 +243,12 @@ class FPMD(Algorithm):
                 vp = optax.apply_updates(vp, v_updates)
 
             # Exp-advantage weights (no ratio network)
-            w = jnp.exp(adv_sg)
+            log_tilt = adv_sg
+            if _tilt is not None:
+                log_tilt = _tilt.log_weights(
+                    TiltBatch(log_tilt, adv, jnp.float32(1.0), obs, action, data, step)
+                )
+            w = jnp.exp(log_tilt)
             w = jnp.clip(w, 0.0, _max_rw)
             w = w / (w.mean() + 1e-8)
 
@@ -363,6 +374,10 @@ class FPMD(Algorithm):
             _alpha_eff = jnp.maximum(jnp.exp(log_alpha), jnp.float32(1e-8))
             _logit = adv_sg / _alpha_eff
             _logit = jnp.clip(_logit, -20.0, 20.0)
+            if _tilt is not None:
+                _logit = _tilt.log_weights(
+                    TiltBatch(_logit, adv, _alpha_eff, obs, action, data, step)
+                )
             w = jnp.exp(_logit)
             w = jnp.clip(w, 0.0, _max_rw)
             w = w / (w.mean() + 1e-8)

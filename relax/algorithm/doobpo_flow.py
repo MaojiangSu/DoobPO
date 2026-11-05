@@ -24,6 +24,7 @@ import haiku as hk
 import pickle
 
 from relax.algorithm.base import Algorithm
+from relax.algorithm.objectives import AdvantageBatch, RatioBatch, RatioSurrogate, resolve_ratio_surrogate
 from relax.network.flow_ppo import FlowPPONet, FlowPPOParams
 from relax.utils.experience import Experience, GAEExperience
 from relax.utils.typing_utils import Metric
@@ -71,7 +72,11 @@ class DoobPOFlowTrainState(NamedTuple):
 
 
 class DoobPOFlow(Algorithm):
-    """Flow DoobPO: on-policy (GAE) or off-policy (twin Q + replay)."""
+    """Flow DoobPO: on-policy (GAE) or off-policy (twin Q + replay).
+
+    ``ratio_surrogate`` configures learned-ratio optimization only.
+    ``objective`` is its legacy keyword alias, not a general policy objective.
+    """
 
     def __init__(
         self,
@@ -116,6 +121,8 @@ class DoobPOFlow(Algorithm):
         target_entropy_scale: float = 0.9,
         adv_clip: float = 0.0,
         q_backup_clip: float = 0.0,
+        objective: Optional[RatioSurrogate] = None,
+        ratio_surrogate: Optional[RatioSurrogate] = None,
     ):
         self.agent = agent
         self.ratio_net = ratio_net
@@ -124,6 +131,8 @@ class DoobPOFlow(Algorithm):
         self.reward_scale = reward_scale
         self.ppo_eps = ppo_eps
         self.max_ratio_weight = max_ratio_weight
+        self.ratio_surrogate = resolve_ratio_surrogate(ratio_surrogate, objective, ppo_eps)
+        self.objective = self.ratio_surrogate  # Compatibility alias for earlier callers.
         self._n_epochs = n_epochs
         self._num_minibatches = num_minibatches
         self._epoch_counter = 0
@@ -213,7 +222,7 @@ class DoobPOFlow(Algorithm):
             )
 
         agent_ref = self.agent
-        _ppo_eps = ppo_eps
+        _objective = self.ratio_surrogate
         _max_rw = max_ratio_weight
         _reg_lambda = ratio_regularizer_lambda
         _vloss_coef = value_loss_coeff
@@ -245,6 +254,9 @@ class DoobPOFlow(Algorithm):
 
             adv_norm = (adv - adv.mean()) / (adv.std() + 1e-8)
             adv_sg = jax.lax.stop_gradient(adv_norm)
+            adv_sg = _objective.prepare_advantages(
+                AdvantageBatch(adv_sg, obs, action, data, step)
+            )
 
             flow_t_key, flow_noise_key, ratio_reg_keys = jax.random.split(key, 3)
             ratio_reg_keys = jax.random.split(ratio_reg_keys, _n_r * 2 + 1)[: _n_r * 2]
@@ -279,8 +291,9 @@ class DoobPOFlow(Algorithm):
 
                 def ratio_loss_fn(rp_):
                     r_beta = self.ratio_net.apply(rp_, obs, action)
-                    r_clip = jnp.clip(r_beta, 1.0 - _ppo_eps, 1.0 + _ppo_eps)
-                    ppo_obj = jnp.minimum(r_beta * adv_sg, r_clip * adv_sg)
+                    objective_loss = _objective.loss(
+                        RatioBatch(r_beta, adv_sg, obs, action, data, step)
+                    )
 
                     r_beta_g1 = self.ratio_net.apply(rp_, obs, action_g1)
                     r_beta_g2 = self.ratio_net.apply(rp_, obs, action_g2)
@@ -288,7 +301,7 @@ class DoobPOFlow(Algorithm):
                     g2 = r_beta_g2.mean() - 1.0
                     regularizer = _reg_lambda * g1 * g2
 
-                    return -ppo_obj.mean() + regularizer, r_beta
+                    return objective_loss + regularizer, r_beta
 
                 (ratio_loss_val, r_beta_val), ratio_grads = jax.value_and_grad(
                     ratio_loss_fn, has_aux=True
@@ -335,6 +348,8 @@ class DoobPOFlow(Algorithm):
                 "r_beta_std": jnp.std(r_beta_val),
                 "r_beta_max": jnp.max(r_beta_val),
                 "advantage_mean": jnp.mean(adv),
+                "objective_advantage_mean": jnp.mean(adv_sg),
+                "objective_advantage_std": jnp.std(adv_sg),
             }
             return new_state, info
 
@@ -438,6 +453,9 @@ class DoobPOFlow(Algorithm):
                 lambda: adv_norm,
             )
             adv_sg = jax.lax.stop_gradient(adv_norm)
+            adv_sg = _objective.prepare_advantages(
+                AdvantageBatch(adv_sg, obs, action, data, step)
+            )
 
             rp_new = rp
             ratio_loss_val = 0.0
@@ -449,13 +467,14 @@ class DoobPOFlow(Algorithm):
 
                 def ratio_loss_fn(rp_):
                     r_beta = self.ratio_net.apply(rp_, obs, action)
-                    r_clip = jnp.clip(r_beta, 1.0 - _ppo_eps, 1.0 + _ppo_eps)
-                    ppo_obj = jnp.minimum(r_beta * adv_sg, r_clip * adv_sg)
+                    objective_loss = _objective.loss(
+                        RatioBatch(r_beta, adv_sg, obs, action, data, step)
+                    )
                     r_beta_prime = self.ratio_net.apply(rp_, obs, action_prime)
                     g_hat_1 = r_beta.mean() - 1.0
                     g_hat_2 = r_beta_prime.mean() - 1.0
                     regularizer = _reg_lambda * g_hat_1 * g_hat_2
-                    return -ppo_obj.mean() + regularizer, r_beta
+                    return objective_loss + regularizer, r_beta
 
                 (ratio_loss_val, r_beta_val), ratio_grads = jax.value_and_grad(
                     ratio_loss_fn, has_aux=True
@@ -549,6 +568,8 @@ class DoobPOFlow(Algorithm):
                 "r_beta_std": jnp.std(r_beta_val),
                 "r_beta_max": jnp.max(r_beta_val),
                 "advantage_mean": jnp.mean(adv),
+                "objective_advantage_mean": jnp.mean(adv_sg),
+                "objective_advantage_std": jnp.std(adv_sg),
                 "q1_mean": jnp.mean(q1_val),
                 "alpha": jnp.exp(la_new),
             }

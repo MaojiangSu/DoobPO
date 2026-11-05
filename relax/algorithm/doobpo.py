@@ -18,7 +18,7 @@ Key difference from DPMD:
   DoobPO → weights = r_β (learned ratio net, PPO-clipped for stability)
 """
 
-from typing import NamedTuple, Tuple
+from typing import NamedTuple, Optional, Tuple
 
 import jax
 import jax.numpy as jnp
@@ -28,6 +28,7 @@ import haiku as hk
 import pickle
 
 from relax.algorithm.base import Algorithm
+from relax.algorithm.objectives import AdvantageBatch, RatioBatch, RatioSurrogate, resolve_ratio_surrogate
 from relax.network.diffv2 import Diffv2Net, Diffv2Params
 from relax.utils.experience import Experience, GAEExperience
 from relax.utils.typing_utils import Metric
@@ -70,7 +71,11 @@ class DoobPOTrainState(NamedTuple):
 # ---------------------------------------------------------------------------
 
 class DoobPO(Algorithm):
-    """Off-policy diffusion RL via Doob h-transform with a learned ratio net."""
+    """Off-policy diffusion RL via Doob h-transform with a learned ratio net.
+
+    ``ratio_surrogate`` configures learned-ratio optimization only.
+    ``objective`` is its legacy keyword alias, not a general policy objective.
+    """
 
     def __init__(
         self,
@@ -94,6 +99,8 @@ class DoobPO(Algorithm):
         ratio_regularizer_lambda: float = 0.01,  # λ for ratio network regularizer: -λ (E[r_β] - 1)^2
         gae_lambda: float = 0.95,  # for on-policy: GAE advantage (when data has .adv)
         use_ema: bool = True,
+        objective: Optional[RatioSurrogate] = None,
+        ratio_surrogate: Optional[RatioSurrogate] = None,
     ):
         self.agent = agent
         self.ratio_net = ratio_net
@@ -105,6 +112,8 @@ class DoobPO(Algorithm):
         self.reward_scale = reward_scale
         self.ppo_eps = ppo_eps
         self.max_ratio_weight = max_ratio_weight
+        self.ratio_surrogate = resolve_ratio_surrogate(ratio_surrogate, objective, ppo_eps)
+        self.objective = self.ratio_surrogate  # Compatibility alias for earlier callers.
         self.ratio_regularizer_lambda = ratio_regularizer_lambda
 
         # V(s) = min_Q(s, deterministic_action(s)) for on-policy GAE
@@ -154,7 +163,7 @@ class DoobPO(Algorithm):
         # ---------------------------------------------------------------
         # JIT-compiled stateless update
         # ---------------------------------------------------------------
-        ppo_eps_const = ppo_eps
+        _objective = self.ratio_surrogate
         max_ratio_weight_const = max_ratio_weight
         ratio_reg_lambda = self.ratio_regularizer_lambda
 
@@ -246,6 +255,9 @@ class DoobPO(Algorithm):
             # 3. Ratio-network update (PPO clipped surrogate)
             # ----------------------------------------------------------
             adv_norm_sg = jax.lax.stop_gradient(adv_norm)
+            adv_norm_sg = _objective.prepare_advantages(
+                AdvantageBatch(adv_norm_sg, obs, action, data, step)
+            )
 
             # Double sampling for ratio regularizer:
             # Sample 2: independent actions from π_old (stop_grad, not differentiating policy)
@@ -260,8 +272,9 @@ class DoobPO(Algorithm):
             def ratio_loss_fn(rp):
                 # r_β > 0 by construction (exp output from the network)
                 r_beta = self.ratio_net.apply(rp, obs, action)  # (B,) — sample 1: buffer actions
-                r_clip = jnp.clip(r_beta, 1.0 - ppo_eps_const, 1.0 + ppo_eps_const)
-                ppo_obj = jnp.minimum(r_beta * adv_norm_sg, r_clip * adv_norm_sg)
+                objective_loss = _objective.loss(
+                    RatioBatch(r_beta, adv_norm_sg, obs, action, data, step)
+                )
 
                 # Unbiased ratio regularizer via double sampling (per paper):
                 #   g := E_{a'~π_old}[r_β(s,a')] - 1
@@ -274,7 +287,7 @@ class DoobPO(Algorithm):
                 g_hat_2 = r_beta_prime.mean() - 1.0
                 regularizer = ratio_reg_lambda * g_hat_1 * g_hat_2
 
-                return -ppo_obj.mean() + regularizer, r_beta
+                return objective_loss + regularizer, r_beta
 
             (ratio_loss_val, r_beta_val), ratio_grads = jax.value_and_grad(
                 ratio_loss_fn, has_aux=True
@@ -417,6 +430,8 @@ class DoobPO(Algorithm):
                 "r_beta_min": jnp.min(r_beta_val),
                 "r_beta_max": jnp.max(r_beta_val),
                 "advantage_mean": adv_mean,
+                "objective_advantage_mean": jnp.mean(adv_norm_sg),
+                "objective_advantage_std": jnp.std(adv_norm_sg),
                 "advantage_std": adv_std,
                 "alpha": jnp.exp(log_alpha),
                 "running_q_mean": new_running_mean,
